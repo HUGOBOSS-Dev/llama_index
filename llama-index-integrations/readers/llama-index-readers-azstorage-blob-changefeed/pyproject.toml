@@ -1,0 +1,43 @@
+[build-system]
+build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core"]
+
+[tool.llamahub]
+contains_example = false
+import_path = "llama_index.readers.azstorage_blob_changefeed"
+
+[tool.llamahub.class_authors]
+GitHubRepositoryReader = "mgoelz"
+
+[tool.mypy]
+disallow_untyped_defs = true
+exclude = ["_static", "build", "examples", "notebooks", "venv"]
+ignore_missing_imports = true
+python_version = "3.8"
+
+[tool.poetry]
+authors = ["Your Name <you@example.com>"]
+description = "llama-index readers azstorage blob changefeed integration"
+exclude = ["**/BUILD"]
+keywords = ["azure", "storage", "blob", "changefeed"]
+license = "MIT"
+maintainers = ["mgoelz"]
+name = "llama-index-readers-azstorage-blob-changefeed"
+readme = "README.md"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = ">=3.9,<4.0"
+llama-index-readers-file = "^0.4.0"
+llama-index-core = "^0.12.0"
+azure-storage-blob-changefeed = "^12.0.0b5"
+
+[tool.poetry.group.dev.dependencies]
+mypy = "0.991"
+pylint = "2.15.10"
+pytest = "7.2.1"
+pytest-mock = "3.11.1"
+ruff = "0.0.292"
+
+[[tool.poetry.packages]]
+include = "llama_index/"
