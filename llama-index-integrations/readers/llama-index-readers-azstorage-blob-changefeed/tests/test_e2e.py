@@ -7,7 +7,8 @@ def test_process_event():
     connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
     reader = BlobChangeFeedReader(connection_string=connection_string, container_name="sap")
 
-    reader.load_data(date=datetime(2025, 2, 1))
+    documents = reader.load_data(date=datetime(2025, 2, 1))
+    token = reader.continuation_token
 
 
 test_process_event()
