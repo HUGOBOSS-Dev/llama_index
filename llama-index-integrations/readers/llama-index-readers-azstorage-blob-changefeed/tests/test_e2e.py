@@ -5,9 +5,9 @@ from llama_index.readers.azstorage_blob_changefeed.base import BlobChangeFeedRea
 
 def test_process_event():
     connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-    reader = BlobChangeFeedReader(connection_string=connection_string, container_name="sap")
+    reader = BlobChangeFeedReader(connection_string=connection_string)
 
-    documents = reader.load_data(date=datetime(2025, 2, 1))
+    documents = reader.load_data(date=datetime(2025, 2, 1), container_name="changes-test")
     token = reader.continuation_token
 
 
