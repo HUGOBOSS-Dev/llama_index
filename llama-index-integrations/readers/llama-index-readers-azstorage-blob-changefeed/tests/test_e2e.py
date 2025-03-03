@@ -7,7 +7,7 @@ def test_process_event():
     connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
     reader = BlobChangeFeedReader(connection_string=connection_string)
 
-    documents = reader.load_data(date=datetime(2025, 2, 1), container_name="changes-test")
+    documents = reader.load_data(start_time=datetime(2025, 2, 1), container_name="changes-test")
     token = reader.continuation_token
 
 

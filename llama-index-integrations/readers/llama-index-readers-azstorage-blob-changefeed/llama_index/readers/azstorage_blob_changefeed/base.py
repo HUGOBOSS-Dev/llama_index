@@ -1,36 +1,70 @@
+from enum import Enum
 import logging
 from datetime import datetime
 import re
-from typing import Any, Dict, Optional, List, Union
+from typing import Any, Dict, Iterator, Optional, List, Union
 import tempfile
 from llama_index.core.readers import SimpleDirectoryReader
 from llama_index.core.readers.base import BasePydanticReader
 from llama_index.core.schema import Document
 from azure.storage.blob import BlobServiceClient
 from azure.storage.blob.changefeed import ChangeFeedClient
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+class EventType(Enum):
+    UPSERT = "Upsert"
+    DELETED = "Deleted"
+
+class ChangeInfo(BaseModel):
+    container: str
+    blob_name: str
+    event_type: EventType
 
 class BlobChangeFeedReader(BasePydanticReader):
 
     connection_string: Optional[str] = None
     file_extractor: Optional[Dict[str, Union[str, BasePydanticReader]]] = Field(None, exclude=True)
     continuation_token: Optional[str] = Field(None, exclude=True)
+    deleted_blobs: Optional[list[ChangeInfo]] = Field([], exclude=True)
 
     def _initialize_change_feed_client(self):
         return ChangeFeedClient.from_connection_string(self.connection_string)
 
-    def _fetch_changes(
-        self,
+    def load_data(self, **kwargs) -> List[Document]:
+        """Implementation of the BasePydanticReader interface."""
+        start_time=kwargs.get("start_time")
+        continuation_token=kwargs.get("continuation_token")
+        container_name=kwargs.get("container_name")
+
+        self.continuation_token = continuation_token
+        self.deleted_blobs = []
+
+        try:
+
+            with BlobServiceClient.from_connection_string(self.connection_string) as service_client:
+
+                for change in self._get_changes(start_time=start_time, continuation_token=continuation_token):
+                    if container_name and change.container != container_name:
+                        continue
+
+                    if change.event_type == EventType.UPSERT:
+                        self._download_and_process_blob(service_client, change.container, change.blob_name)
+                    elif change.event_type == EventType.DELETED:
+                        self.deleted_blobs.append(change)
+
+        except Exception as e:
+            logger.error(f"Error loading data: {e}")
+            raise
+
+    def _get_changes(self,
         start_time: Optional[datetime] = None,
         continuation_token: Optional[str] = None,
-        container_name: Optional[str] = None
-    ) -> List[Document]:
+    ) -> Iterator[ChangeInfo]:
         """Fetch and process changes from Azure Blob Storage change feed."""
         client = self._initialize_change_feed_client()
         logger.info("Fetching change feed events.")
-        documents = []
         results_per_page = 1
 
         self.continuation_token = continuation_token
@@ -54,36 +88,26 @@ class BlobChangeFeedReader(BasePydanticReader):
                             continue
 
                         evt_container, blob_name = match.groups()
-                        if container_name and evt_container != container_name:
+
+                        blob_event_type = event.get("eventType", "Unknown")
+                        if blob_event_type in ("BlobCreated", "BlobUpdated"):
+                            event_type = EventType.UPSERT
+                        elif blob_event_type == "BlobDeleted":
+                            event_type = EventType.DELETED
+                        else:
                             continue
 
-                        documents.extend(self._process_event(event, evt_container, blob_name))
+                        yield ChangeInfo(container=evt_container, blob_name=blob_name, event_type=event_type)
+
 
         except Exception as e:
             logger.error(f"Error fetching changes: {e}")
             raise
 
-        return documents
 
-    def _process_event(self, event, container_name: str, blob_name: str) -> List[Document]:
-        """Process a single blob change event."""
-        event_type = event.get("eventType", "Unknown")
-        logger.info(f"Processing {event_type} event")
-
-        if event_type in ("BlobCreated", "BlobUpdated"):
-            return self._download_and_process_blob(container_name, blob_name)
-        elif event_type == "BlobDeleted":
-            url = event.get("data", {}).get("url", "Unknown")
-            logger.info(f"Blob deleted: {url}")
-        else:
-            logger.debug(f"Unhandled event type: {event_type}")
-
-        return []
-
-    def _download_and_process_blob(self, container_name: str, blob_name: str) -> List[Document]:
+    def _download_and_process_blob(self, service_client: BlobServiceClient, container_name: str, blob_name: str) -> List[Document]:
         """Download blob content and process it into documents."""
         try:
-            with BlobServiceClient.from_connection_string(self.connection_string) as service_client:
                 blob_client = service_client.get_blob_client(container=container_name, blob=blob_name)
 
                 with tempfile.NamedTemporaryFile(delete=False) as temp_file:
@@ -104,6 +128,7 @@ class BlobChangeFeedReader(BasePydanticReader):
         except Exception as e:
             logger.error(f"Error processing blob {blob_name}: {e}")
             raise
+
     def _extract_blob_metadata(self, file_metadata: Dict[str, Any]) -> Dict[str, Any]:
         meta: dict = file_metadata
 
@@ -132,11 +157,3 @@ class BlobChangeFeedReader(BasePydanticReader):
         extracted_meta.update(meta.get("tags") or {})
 
         return extracted_meta
-
-    def load_data(self, **kwargs) -> List[Document]:
-        """Implementation of the BasePydanticReader interface."""
-        return self._fetch_changes(
-            start_time=kwargs.get("start_time"),
-            continuation_token=kwargs.get("continuation_token"),
-            container_name=kwargs.get("container_name")
-        )
